@@ -18,10 +18,10 @@ const schema = properties => ({ type: 'object', properties, additionalProperties
 const idSchema = { type: 'string', pattern: UUID.source };
 const paging = { offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100 } };
 const definitions = [
-  { name: 'claude_list_chats', description: 'List local native Claude Code chats, including saved history and separately identified subagents. Remote Claude and other Claude apps are not connected.', inputSchema: schema(paging), annotations: { readOnlyHint: true } },
-  { name: 'claude_read_chat', description: 'Read visible native transcript records, including tool calls with native inputs and tool results, by exact parent session ID, optionally a listed agentId and projectKey to disambiguate copied histories. Offset is the zero-based source JSONL record index; nextOffset preserves position across filtered internal records. No hidden thinking or auth keys.', inputSchema: { ...schema({ sessionId: idSchema, agentId: { type: 'string', pattern: AGENT.source }, projectKey: { type: 'string', minLength: 1 }, ...paging }), required: ['sessionId'] }, annotations: { readOnlyHint: true } },
-  { name: 'claude_send_message', description: 'Send an explicitly user-authorized message to an existing live exact Claude session. Native authenticated pipe submission is unconfirmed until native evidence arrives. Starts only this provider own callback receiver, never a Claude chat. Read claude_read_inbox for genuine replies or receipts.', inputSchema: { ...schema({ sessionId: idSchema, message: { type: 'string', minLength: 1 } }), required: ['sessionId', 'message'] }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false } },
-  { name: 'claude_read_inbox', description: 'Read authenticated native replies/receipts received by this MCP process from exact contacted Claude session pipes. No reply returns pending. Replies are attributed to source session, not falsely correlated to a request. Inbox is process-local and disappears on close.', inputSchema: schema({ sessionId: idSchema, ...paging }), annotations: { readOnlyHint: true } },
+  { name: 'claude_list_chats', description: 'Find Claude Code chats on this computer, including saved chats and their subagents. Use the returned sessionId to read a chat; sendAvailable identifies chats you can message now. Continue with nextOffset. Remote Claude and other Claude apps are not connected.', inputSchema: schema(paging), annotations: { readOnlyHint: true } },
+  { name: 'claude_read_chat', description: 'Read a Claude chat\'s messages and tool activity. Use a sessionId from claude_list_chats; include its projectKey if needed to distinguish copies, or a listed agentId to read a subagent. Continue with the returned nextOffset, not the number of displayed messages: offset counts source records. Hidden thinking and auth keys are excluded.', inputSchema: { ...schema({ sessionId: idSchema, agentId: { type: 'string', pattern: AGENT.source }, projectKey: { type: 'string', minLength: 1 }, ...paging }), required: ['sessionId'] }, annotations: { readOnlyHint: true } },
+  { name: 'claude_send_message', description: 'Send a user-authorized message to a running Claude Code chat. Use its exact sessionId from claude_list_chats and check sendAvailable. Ask Claude to reply with its native SendMessage to the received message\'s from address, then use claude_read_inbox to receive the reply. Submission alone does not confirm receipt. This tool does not start or resume stopped chats.', inputSchema: { ...schema({ sessionId: idSchema, message: { type: 'string', minLength: 1 } }), required: ['sessionId', 'message'] }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false } },
+  { name: 'claude_read_inbox', description: 'Read replies and delivery receipts from Claude chats you contacted through this connection. Filter by sessionId and continue with nextOffset. pending means no matching reply has arrived. Keep this connection open while waiting; the inbox disappears when it closes. A reply identifies its source chat, but is not automatically matched to a particular request.', inputSchema: schema({ sessionId: idSchema, ...paging }), annotations: { readOnlyHint: true } },
 ];
 function checkArgs(name, args) {
   const def = definitions.find(d => d.name === name);
@@ -89,7 +89,42 @@ async function liveSessions(registryDir) {
     try { process.kill(s.pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; }
   });
 }
-async function historyIndex(projectsDir, metadata = true, targetSessionId) {
+async function historyMetadata(file, sessionId) {
+  const metadata = {};
+  function apply(record) {
+    if (record?.sessionId && record.sessionId !== sessionId) return;
+    if (typeof record?.customTitle === 'string') metadata.title = record.customTitle;
+    if (!metadata.title && typeof record?.summary === 'string') metadata.title = record.summary;
+    if (typeof record?.cwd === 'string') metadata.cwd = record.cwd;
+  }
+  const handle = await fs.open(file, 'r');
+  let complete, tailComplete, lastCustomTitle;
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - 64 * 1024);
+    const buffer = Buffer.alloc(size - start);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+    tailComplete = bytesRead === buffer.length;
+    complete = start === 0 && tailComplete;
+    let text = buffer.subarray(0, bytesRead).toString('utf8');
+    // The first tail line may start in the middle of a JSON record or UTF-8 character.
+    if (start > 0) text = text.includes('\n') ? text.slice(text.indexOf('\n') + 1) : '';
+    for (const line of text.split('\n')) {
+      let record;
+      try { record = JSON.parse(line); } catch { continue; }
+      if (record?.sessionId && record.sessionId !== sessionId) continue;
+      if (typeof record?.customTitle === 'string') lastCustomTitle = record.customTitle;
+      apply(record);
+    }
+  } finally { await handle.close(); }
+  // A nonempty latest custom title supersedes every earlier summary/title.
+  // Otherwise scan the full source to preserve summary and empty-title semantics.
+  if (complete || (tailComplete && lastCustomTitle && typeof metadata.cwd === 'string')) return metadata;
+  delete metadata.title; delete metadata.cwd;
+  for await (const { record } of records(file)) apply(record);
+  return metadata;
+}
+async function historyIndex(projectsDir, targetSessionId) {
   const entries = [];
   for (const project of await directoryEntries(projectsDir)) {
     if (!project.isDirectory() || project.isSymbolicLink()) continue;
@@ -106,12 +141,6 @@ async function historyIndex(projectsDir, metadata = true, targetSessionId) {
           const agentFile = await boundFile(projectsDir, path.join(dir, sessionId, 'subagents', agent.name));
           item.subagents.push({ agentId: match[1], parentSessionId: sessionId, isSidechain: true, file: agentFile });
         }
-      }
-      if (metadata) for await (const { record } of records(full)) {
-        if (record?.sessionId && record.sessionId !== sessionId) continue;
-        if (typeof record?.customTitle === 'string') item.title = record.customTitle;
-        if (!item.title && typeof record?.summary === 'string') item.title = record.summary;
-        if (typeof record?.cwd === 'string') item.cwd = record.cwd;
       }
       entries.push(item);
     }
@@ -184,10 +213,10 @@ export function createClaudeChatProvider({ projectsDir = path.join(os.homedir(),
           }
           return { ...result, callbackUri: callback.callbackUri, delivery: result.status === 'submitted_unconfirmed' ? 'submitted_unconfirmed' : result.status === 'failed' ? 'not_sent' : 'unknown' };
         }
-        const history = await historyIndex(projectsDir, name === 'claude_list_chats', name === 'claude_read_chat' ? args.sessionId : undefined);
+        const history = await historyIndex(projectsDir, name === 'claude_read_chat' ? args.sessionId : undefined);
         if (name === 'claude_list_chats') {
           const live = await liveSessions(registryDir);
-          const list = history.map(({ file, subagents, ...entry }) => ({ ...entry, subagents: subagents.map(({ file, ...agent }) => agent), live: live.some(s => s.sessionId === entry.sessionId), sendAvailable: live.filter(s => s.sessionId === entry.sessionId).length === 1 }));
+          const list = history.map(({ subagents, ...entry }) => ({ ...entry, subagents: subagents.map(({ file, ...agent }) => agent), live: live.some(s => s.sessionId === entry.sessionId), sendAvailable: live.filter(s => s.sessionId === entry.sessionId).length === 1 }));
           for (const session of live) {
             const entries = list.filter(e => e.sessionId === session.sessionId);
             if (!entries.length) list.push({ sessionId: session.sessionId, historyAvailable: false, live: true, sendAvailable: live.filter(s => s.sessionId === session.sessionId).length === 1, subagents: [] });
@@ -196,7 +225,16 @@ export function createClaudeChatProvider({ projectsDir = path.join(os.homedir(),
             }
           }
           list.sort((a, b) => Number(b.live) - Number(a.live) || String(b.modifiedAt ?? '').localeCompare(String(a.modifiedAt ?? '')) || a.sessionId.localeCompare(b.sessionId));
-          return { scope, chats: list.slice(offset, offset + limit), total: list.length, offset, nextOffset: offset + limit < list.length ? offset + limit : null };
+          const chats = [];
+          for (const { file, ...chat } of list.slice(offset, offset + limit)) {
+            if (file) {
+              const metadata = await historyMetadata(file, chat.sessionId);
+              if (metadata.title !== undefined) chat.title = metadata.title;
+              if (metadata.cwd !== undefined && chat.cwd === undefined) chat.cwd = metadata.cwd;
+            }
+            chats.push(chat);
+          }
+          return { scope, chats, total: list.length, offset, nextOffset: offset + limit < list.length ? offset + limit : null };
         }
         const found = history.filter(e => e.sessionId === args.sessionId && (!args.projectKey || e.projectKey === args.projectKey));
         if (found.length !== 1) return { status: 'not_available', reason: found.length ? 'AMBIGUOUS_HISTORY' : 'HISTORY_NOT_FOUND', sessionId: args.sessionId };

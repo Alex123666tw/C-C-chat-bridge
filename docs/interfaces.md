@@ -4,6 +4,10 @@
 
 本工具是原生聊天介面的薄橋接。Codex 端直接呼叫 Desktop 的內部跨聊天工具；Claude 端讀取本機可見歷史並使用認證訊息管道。它不提供一般檔案服務，也不新增對外 HTTP server。
 
+Codex 的聊天清單以當次原生 `list_threads` 為準，可能包括本機、已連線遠端及 ChatGPT 聊天；讀取仍是原生可取得的回合與摘要。Claude 的原生 `ListAgents` 列出可聯繫的 peer，不等於全部儲存歷史；本橋接的 `claude_list_chats` 另外列出本機歷史，只有 `live`／`sendAvailable` 的聊天可嘗試傳訊。Claude 原生 `SendMessage` 用來傳訊，沒有讀取對方歷史的參數。
+
+MCP 只是把聊天操作提供給模型的工具入口。底層傳訊使用原生介面，CLI 也可直接使用；不必另開網路服務。模型應先列出聊天取得目的 ID，再讀取或傳訊；等 Claude 回覆時須保持接收連線。關掉聊天畫面、停止工作階段、關掉回程接收器是不同狀態，不能只用「尚未封存」判斷是否可傳訊。本橋接不會自行恢復已停止的 Claude 主聊天。
+
 ## 工具介面
 
 MCP 入口為 `src/mcp-server.mjs`，以 stdin/stdout 每行一個 JSON-RPC 2.0 訊息通訊。客戶端需先 `initialize`、送 `notifications/initialized`，再使用 `tools/list`／`tools/call`。支援 `ping` 與 `notifications/cancelled`；工具列表沒有分頁。結果同時提供文字 JSON 與 `structuredContent`；`failed`／`unknown` 可帶 `isError: true`。

@@ -1,6 +1,6 @@
 {
   "name": "c-c-chat-bridge",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local MCP bridge for native Codex and Claude Code cross-chat messaging",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/Alex123666tw/c-c-chat-bridge.git" },

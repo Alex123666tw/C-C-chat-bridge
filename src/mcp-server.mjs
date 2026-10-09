@@ -88,7 +88,13 @@ export async function serveMcp(config, { input = process.stdin, output = process
   const pending = new Set();
   const send = value => output.write(JSON.stringify(value) + '\n');
   const nativeCatalog = () => {
-    catalog ??= codex.listTools().catch(error => { catalog = undefined; throw error; });
+    catalog ??= codex.listTools().catch(error => {
+      catalog = undefined;
+      if (['PIPE_ERROR', 'PIPE_CLOSED', 'TIMEOUT'].includes(error.code)) {
+        throw new RpcError(-32603, 'Cannot connect to Codex. Update the current Codex pipe in your bridge configuration, then reconnect c-c-chat-bridge.');
+      }
+      throw error;
+    });
     return catalog;
   };
   async function tools() {
@@ -97,14 +103,14 @@ export async function serveMcp(config, { input = process.stdin, output = process
       .map(tool => ({
         name: 'codex_' + tool.name,
         description: tool.description + (tool.name === 'send_message_to_thread'
-          ? '\nExternal MCP source and Codex owner are attributed. Requires user authorization to message the target. Only accepted dispatch is returned.'
-          : '\nFull native response is preserved; native owner visibility and host limitations apply.'),
+          ? '\nRequires user authorization to message this chat. Accepted means dispatched; read the chat to confirm its reply.'
+          : '\nUse the native host IDs and cursors as returned. Visibility follows the Codex source chat.'),
         inputSchema: tool.inputSchema,
         annotations: { readOnlyHint: READ_ONLY.has(tool.name) },
       }));
     if (native.some(tool => tool.name === 'send_message_to_thread') && native.some(tool => tool.name === 'read_thread')) {
       exposed.push({ name: 'codex_request',
-        description: 'Send an externally sourced MCP request and wait for its own new completed turn and full final answer. Requires user authorization to message the target. Missing result is unknown and never automatically resent. Omitted target/host use config defaults.',
+        description: 'Ask a Codex chat to do a user-authorized task and wait for its full final answer. Use a threadId and hostId from codex_list_threads, or omit them to use configured defaults. An unconfirmed result is unknown; check the chat before retrying.',
         inputSchema: requestSchema, annotations: { readOnlyHint: false } });
     }
     for (const provider of providers) for (const tool of await provider.tools()) {
@@ -190,7 +196,7 @@ export async function serveMcp(config, { input = process.stdin, output = process
             typeof message.params.clientInfo.version !== 'string') throw new RpcError(-32602, 'Invalid initialize parameters');
         phase = 'initializing';
         value = { protocolVersion: VERSIONS.includes(message.params.protocolVersion) ? message.params.protocolVersion : VERSIONS[0],
-          capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'local-cross-chat', version: '0.2.1' },
+          capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'c-c-chat-bridge', version: '0.2.2' },
           instructions: 'Local owner-scoped tools. External MCP messages are attributed and sends require user authorization. Native chat visibility and host limitations apply.' };
       } else if (message.method === 'ping') value = {};
       else {

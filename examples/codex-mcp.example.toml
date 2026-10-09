@@ -1,7 +1,7 @@
 # Merge into your own Codex config.toml and replace every placeholder.
 # Obtain the owner and current native pipe from the authorized Codex Desktop chat.
 # Keep personal connection values private. The bridge does not install client configuration.
-[mcp_servers.local_cross_chat]
+[mcp_servers.c-c-chat-bridge]
 command = "node"
 args = ["C:/tools/c-c-chat-bridge/src/mcp-server.mjs", "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID", "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"]
 # Client timeout in seconds; allow time for the bridge's default 600-second result wait.

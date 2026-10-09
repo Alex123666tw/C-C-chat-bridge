@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import nativeFs from 'node:fs';
 import { promises as fs } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createClaudeChatProvider } from '../src/claude-chats.mjs';
 import { keyFileFor, readPeerToken, socketUri } from '../src/claude.mjs';
@@ -36,7 +38,7 @@ async function transmit(socketPath, frames) {
 async function fakeNative(t, f) {
   const socketPath = process.platform === 'win32' ? '\\\\.\\pipe\\LOCAL\\cc-msg-' + randomBytes(16).toString('hex') : path.join(f.root, 'native.sock');
   const token = randomBytes(16).toString('hex');
-  await fs.writeFile(path.join(f.registryDir, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: f.sessionId, messagingSocketPath: socketPath, name: 'Native fixture', peerToken: 'must-never-leak' }));
+  await fs.writeFile(path.join(f.registryDir, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: f.sessionId, messagingSocketPath: socketPath, name: 'Native fixture', cwd: f.project, peerToken: 'must-never-leak' }));
   await fs.writeFile(keyFileFor(process.pid, socketPath, f.registryDir), JSON.stringify({ peerToken: token }));
   const frames = []; let done;
   const captured = new Promise(resolve => { done = resolve; });
@@ -54,7 +56,7 @@ async function fakeNative(t, f) {
 }
 
 test('normal catalog includes saved inactive parent histories, separately identified subagents and live native chats', async t => {
-  const f = await fixture(t); await f.save([{ type: 'custom-title', sessionId: f.sessionId, customTitle: 'Saved fixture' }, msg('user', 'saved')]);
+  const f = await fixture(t); await f.save([{ type: 'custom-title', sessionId: f.sessionId, customTitle: 'Saved fixture' }, msg('user', 'saved', { cwd: '/saved' })]);
   const agentDir = path.join(f.project, f.sessionId, 'subagents'); await fs.mkdir(agentDir, { recursive: true });
   await fs.writeFile(path.join(agentDir, 'agent-child1.jsonl'), JSON.stringify(msg('assistant', 'child reply', { isSidechain: true })) + '\n');
   const native = await fakeNative(t, f);
@@ -62,6 +64,7 @@ test('normal catalog includes saved inactive parent histories, separately identi
   const result = await f.provider.call('claude_list_chats', { limit: 1 });
   assert.equal(result.total, 2); assert.equal(result.chats[0].sessionId, f.sessionId);
   assert.equal(result.chats[0].title, 'Saved fixture'); assert.equal(result.chats[0].sendAvailable, true);
+  assert.equal(result.chats[0].cwd, f.project);
   assert.deepEqual(result.chats[0].subagents[0], { agentId: 'child1', parentSessionId: f.sessionId, isSidechain: true });
   assert.equal(result.nextOffset, 1); assert.equal(result.scope.remoteClaude, 'not_connected');
   const page2 = await f.provider.call('claude_list_chats', { offset: result.nextOffset });
@@ -69,6 +72,59 @@ test('normal catalog includes saved inactive parent histories, separately identi
   assert.ok(!JSON.stringify(result).includes(native.token)); assert.ok(!JSON.stringify(result).includes('must-never-leak'));
   const child = await f.provider.call('claude_read_chat', { sessionId: f.sessionId, agentId: 'child1' });
   assert.equal(child.messages[0].content[0].text, 'child reply'); assert.equal(child.messages[0].isSidechain, true);
+});
+
+test('listing a page of large saved histories preserves latest metadata without reading all transcripts', async t => {
+  const f = await fixture(t), ids = [f.sessionId, ...Array.from({ length: 7 }, () => randomUUID())];
+  const payload = msg('assistant', '原文'.repeat(180000));
+  for (const [i, id] of ids.entries()) {
+    await f.save([msg('user', 'first', { cwd: '/old' }), payload,
+      { type: 'custom-title', sessionId: id, customTitle: '最新標題 ' + i },
+      msg('user', 'last', { cwd: '/latest/' + i, sessionId: id }),
+      { type: 'custom-title', sessionId: randomUUID(), customTitle: 'wrong session', cwd: '/wrong' }], id);
+    await fs.utimes(path.join(f.project, id + '.jsonl'), new Date(100000 + i * 1000), new Date(100000 + i * 1000));
+  }
+  // Observe actual filesystem bytes while still performing each real read.
+  let bytesRead = 0;
+  const open = fs.open.bind(fs), stream = nativeFs.createReadStream;
+  t.mock.method(fs, 'open', async (...args) => {
+    const handle = await open(...args), read = handle.read.bind(handle);
+    handle.read = async (...readArgs) => { const result = await read(...readArgs); bytesRead += result.bytesRead; return result; };
+    return handle;
+  });
+  t.mock.method(nativeFs, 'createReadStream', (...args) => {
+    const input = stream(...args); input.on('data', chunk => { bytesRead += Buffer.byteLength(chunk); }); return input;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const first = await f.provider.call('claude_list_chats', { limit: 1 });
+  assert.equal(first.total, ids.length); assert.equal(first.chats[0].sessionId, ids.at(-1));
+  assert.equal(first.chats[0].title, '最新標題 7'); assert.equal(first.chats[0].cwd, '/latest/7');
+  assert.ok(bytesRead < 128 * 1024, 'one listed chat should not read multi-megabyte transcript bodies');
+  const second = await f.provider.call('claude_list_chats', { offset: first.nextOffset, limit: 1 });
+  assert.equal(second.chats[0].sessionId, ids.at(-2)); assert.equal(second.chats[0].title, '最新標題 6');
+  assert.ok(bytesRead < 256 * 1024, 'the next page should read only its own metadata');
+  const history = await f.provider.call('claude_read_chat', { sessionId: ids.at(-1), offset: 1, limit: 1 });
+  assert.equal(history.messages[0].content[0].text, payload.message.content);
+  assert.ok(!Object.hasOwn(first.chats[0], 'file') && !JSON.stringify(first).includes('/wrong'));
+});
+
+test('metadata outside the tail and empty renamed titles retain full-history fallback semantics', async t => {
+  const f = await fixture(t);
+  const filler = msg('assistant', 'large body '.repeat(10000));
+  const scenarios = [
+    { records: [{ type: 'summary', summary: 'first summary' }, filler, { type: 'summary', summary: 'later summary', cwd: '/last' }], title: 'first summary' },
+    { records: [{ type: 'custom-title', customTitle: 'early title', cwd: '/early' }, filler, { type: 'cost-state' }], title: 'early title', cwd: '/early' },
+    { records: [{ type: 'custom-title', customTitle: 'old title' }, filler, { type: 'custom-title', customTitle: '', cwd: '/last' }], title: '' },
+    { records: [{ type: 'summary', summary: 'old summary' }, filler, { type: 'custom-title', customTitle: '', cwd: '/last' }, { type: 'summary', summary: 'after empty' }], title: 'after empty' },
+  ];
+  for (const scenario of scenarios) {
+    await f.save(scenario.records);
+    await fs.appendFile(path.join(f.project, f.sessionId + '.jsonl'), '{"type":"custom-title"');
+    const listed = await f.provider.call('claude_list_chats');
+    assert.equal(listed.chats[0].title, scenario.title);
+    assert.equal(listed.chats[0].cwd, scenario.cwd ?? '/last');
+  }
 });
 
 test('normal history pages preserve native record indices and parent IDs while removing thinking and internal records', async t => {

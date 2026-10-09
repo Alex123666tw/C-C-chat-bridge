@@ -68,7 +68,7 @@ node src/cli.mjs codex read --owner-thread "YOUR_CODEX_OWNER_THREAD_ID" --pipe "
 把 [Codex 範例](../examples/codex-mcp.example.toml) 合併到自己的 `%USERPROFILE%\.codex\config.toml`；若已有同名設定，編輯該段，不要建立重複 TOML table：
 
 ```toml
-[mcp_servers.local_cross_chat]
+[mcp_servers.c-c-chat-bridge]
 command = "node"
 args = ["C:/tools/c-c-chat-bridge/src/mcp-server.mjs", "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID", "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"]
 tool_timeout_sec = 660
@@ -76,7 +76,7 @@ tool_timeout_sec = 660
 
 將路徑改成實際安裝位置。如果客戶端找不到 `node`，`command` 改用 `node.exe` 的絕對路徑。`tool_timeout_sec` 是 Codex 客戶端設定，讓一次工具呼叫有時間等候橋接預設的 600 秒結果；若改變橋接等待時間，也要相應調整客戶端上限。[OpenAI 官方 MCP 說明](https://developers.openai.com/codex/mcp)列出設定位置與客戶端逾時選項。
 
-用 `codex mcp get local_cross_chat` 檢查儲存的設定，在客戶端重新連接後確認能看到橋接工具。設定存在只證明設定已寫入，仍須實際呼叫讀取工具。
+用 `codex mcp get c-c-chat-bridge` 檢查儲存的設定，在客戶端重新連接後確認能看到橋接工具。設定存在只證明設定已寫入，仍須實際呼叫讀取工具。
 
 ### Claude Code 設定
 
@@ -85,7 +85,7 @@ tool_timeout_sec = 660
 ```json
 {
   "mcpServers": {
-    "local-cross-chat": {
+    "c-c-chat-bridge": {
       "command": "node",
       "args": [
         "C:/tools/c-c-chat-bridge/src/mcp-server.mjs",
@@ -101,6 +101,8 @@ tool_timeout_sec = 660
 路徑與參數需替換成實值；JSON 的 Windows 反斜線要寫成 `\\`，使用 `/` 的路徑可避免路徑跳脫問題。這裡的 `timeout` 以毫秒計，是 Claude 客戶端每次工具呼叫的上限。[Claude 官方 MCP 說明](https://code.claude.com/docs/en/mcp)說明專案設定與使用確認。
 
 這份含個人接線資訊的 `.mcp.json` 請留在本機。若不希望使用專案共享設定，可依 `claude mcp add --help` 選用 `local` 或 `user` scope；兩者由 Claude 自己管理。啟動 Claude 後依其介面確認 MCP，使用 `/mcp` 查看連線，再呼叫讀取工具。工具可見與 MCP 已連線仍不代表使用者已授權任意傳訊。
+
+已開啟的 Claude 工作階段可能保留舊註冊名稱及工具清單。更新設定後，重新連接該 MCP，或重新開啟受影響的聊天；新工作階段讀取得到工具，仍不能證明舊工作階段已更新。
 
 ### 只啟動 server 不會開聊天
 
@@ -272,6 +274,7 @@ node src/cli.mjs claude send --session-id "YOUR_LIVE_CLAUDE_SESSION_UUID" --call
 | 現象 | 檢查方式 |
 |---|---|
 | MCP 啟動失敗 | 核對 Node 路徑、絕對入口、owner、當次 pipe 及八個有效啟動選項；本工具不安裝客戶端設定 |
+| 已連線但工具數為 0／tool catalog unavailable | stdio 啟動成功仍可能接不到 Codex。用唯讀命令確認當次 pipe；Codex 重啟後更新 `--pipe` 或本機設定的 `codexPipePath`，再重新連接 MCP。客戶端註冊名稱與 server 名稱均為 `c-c-chat-bridge` |
 | `PIPE_ERROR`／`PIPE_CLOSED` | Codex App 是否仍執行、是否重啟、pipe 是否仍為當次值；重新做唯讀確認 |
 | Claude `not_available` | 目的是否仍 live、是否只有一筆精確 session；歷史存在不代表可發送 |
 | `AUTH_KEY_UNAVAILABLE` | 原生 Claude 程序／registry 是否有效且可讀；不要公開 key，也不要為測試改帳戶權限 |

@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "local-cross-chat": {
+    "c-c-chat-bridge": {
       "command": "node",
       "args": [
         "C:/tools/c-c-chat-bridge/src/mcp-server.mjs",
