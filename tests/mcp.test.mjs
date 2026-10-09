@@ -95,6 +95,17 @@ async function consumer(t, endpoint, { cli = false, provider = false, initVersio
   return { child, request, notification, initialize, messages, events, closed, stderr: () => stderr };
 }
 
+test('a connected stdio server reports an actionable error when its native Codex pipe is gone', async t => {
+  const pipePath = process.platform === 'win32' ? '\\\\.\\pipe\\missing-chat-' + randomUUID() : join(tmpdir(), 'missing-chat-' + randomUUID() + '.sock');
+  const client = await consumer(t, { pipePath });
+  assert.ok((await client.initialize()).result);
+  const listed = await client.request('tools/list');
+  assert.equal(listed.error.code, -32603);
+  assert.match(listed.error.message, /Update the current Codex pipe/);
+  assert.match(listed.error.message, /reconnect c-c-chat-bridge/);
+  assert.equal(client.stderr(), '');
+});
+
 test('stdio lifecycle, negotiation, native chat schemas, notifications and protocol errors', async t => {
   const endpoint = await fakeNativePipe(t, (request, socket) => reply(socket, request, fullNative));
   const client = await consumer(t, endpoint, { initVersion: 'future-version' });

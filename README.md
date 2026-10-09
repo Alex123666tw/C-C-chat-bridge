@@ -25,6 +25,7 @@ Once connected, tell your model which chat to contact and what to send. A messag
 ## Things to know
 
 - Claude support currently covers local Claude Code chats. The Claude App and Claude on other devices are not connected.
+- Saved Claude chats can be read, but messaging requires a running Claude Code session. Keep the connection open while waiting for its reply.
 - The bridge uses internal app interfaces, so updates or restarting Codex Desktop may require reconnecting.
 - Connect only clients you trust: they can read visible chat text and tool results.
 

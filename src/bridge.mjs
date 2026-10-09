@@ -84,15 +84,16 @@ export async function serve(configPath, statePath, options = {}) {
       .catch(e => output({status:'error',code:'RECEIPT_RECORD_FAILED',error:e.message}));
     receipts.add(task); task.finally(()=>receipts.delete(task));
   });
-  receiver.onMessage(frame => { router.receive(frame); });
+  const stopMessages = receiver.onMessage(frame => { router.receive(frame); });
   await writeFile(statePath,JSON.stringify(state,null,2)+'\n','utf8');
   ownsState = true;
   await record({event:'bridge_ready',...state});
   output({status:'ready',statePath,...state});
   await new Promise(resolveStop=>{
-    stopHandler = resolveStop;
+    stopHandler = () => { stopMessages(); resolveStop(); };
     process.once('SIGINT',stopHandler); process.once('SIGTERM',stopHandler);
   });
+  await receiver.close();
   await router.drained();
   await Promise.all(receipts);
   } finally {
