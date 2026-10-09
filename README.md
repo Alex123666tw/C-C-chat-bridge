@@ -1,4 +1,4 @@
-# Cross-model Chat Bridge
+# C(Codex)-C(Claude) Chat Bridge
 
 繁體中文 · [English](docs/README.en.md)
 
@@ -27,6 +27,8 @@ flowchart LR
 | 取得回覆 | 等待本次工作的最終答覆 | 同一 MCP 程序的 inbox 中的原生回覆／回執 |
 
 ## 開始使用
+
+想讓模型自行接線，可直接把 [配置提示](docs/setup-prompt.md) 交給正在使用的 Codex 或 Claude Code。雙方各配置自己的客戶端；以下也提供手動接線方式。
 
 需要 Windows、Node.js 20 以上、正在執行的 Codex Desktop，以及要收訊息的 Claude Code 聊天。兩端必須允許使用此 MCP；安裝橋接本身不會替你開啟客戶端工具或授權。
 

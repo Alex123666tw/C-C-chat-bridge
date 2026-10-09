@@ -70,7 +70,7 @@ node src/cli.mjs codex read --owner-thread "YOUR_CODEX_OWNER_THREAD_ID" --pipe "
 ```toml
 [mcp_servers.local_cross_chat]
 command = "node"
-args = ["C:/tools/cross-model-chat-bridge/src/mcp-server.mjs", "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID", "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"]
+args = ["C:/tools/c-c-chat-bridge/src/mcp-server.mjs", "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID", "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"]
 tool_timeout_sec = 660
 ```
 
@@ -88,7 +88,7 @@ tool_timeout_sec = 660
     "local-cross-chat": {
       "command": "node",
       "args": [
-        "C:/tools/cross-model-chat-bridge/src/mcp-server.mjs",
+        "C:/tools/c-c-chat-bridge/src/mcp-server.mjs",
         "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID",
         "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"
       ],

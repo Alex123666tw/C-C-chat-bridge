@@ -3,7 +3,7 @@
     "local-cross-chat": {
       "command": "node",
       "args": [
-        "C:/tools/cross-model-chat-bridge/src/mcp-server.mjs",
+        "C:/tools/c-c-chat-bridge/src/mcp-server.mjs",
         "--owner-thread",
         "YOUR_CODEX_OWNER_THREAD_ID",
         "--pipe",

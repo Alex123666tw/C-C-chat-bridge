@@ -1,9 +1,9 @@
 {
-  "name": "local-chat-bridge",
+  "name": "c-c-chat-bridge",
   "version": "0.2.1",
   "description": "Local MCP bridge for native Codex and Claude Code cross-chat messaging",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/Alex123666tw/cross-model-chat-bridge.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/Alex123666tw/c-c-chat-bridge.git" },
   "private": true,
   "type": "module",
   "engines": {

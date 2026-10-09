@@ -1,4 +1,4 @@
-# Cross-model Chat Bridge
+# C(Codex)-C(Claude) Chat Bridge
 
 [繁體中文](../README.md) · English
 
@@ -27,6 +27,8 @@ flowchart LR
 | Receive replies | Wait for the final answer to this specific request | Read native replies/receipts from this MCP process's inbox |
 
 ## Getting started
+
+To have your model configure its own client, give it the [setup prompt](setup-prompt.md) (Traditional Chinese). Run it separately in each client. Manual setup is also described below.
 
 Requires Windows, Node.js 20 or later, a running Codex Desktop app and a running Claude Code chat to receive messages. Both clients must allow this MCP server; installing the bridge does not enable their tools or grant permission.
 

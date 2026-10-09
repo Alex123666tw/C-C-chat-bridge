@@ -3,6 +3,6 @@
 # Keep personal connection values private. The bridge does not install client configuration.
 [mcp_servers.local_cross_chat]
 command = "node"
-args = ["C:/tools/cross-model-chat-bridge/src/mcp-server.mjs", "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID", "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"]
+args = ["C:/tools/c-c-chat-bridge/src/mcp-server.mjs", "--owner-thread", "YOUR_CODEX_OWNER_THREAD_ID", "--pipe", "YOUR_CURRENT_CODEX_PIPE_PATH"]
 # Client timeout in seconds; allow time for the bridge's default 600-second result wait.
 tool_timeout_sec = 660
