@@ -1,4 +1,24 @@
-# 讓模型配置自己的 MCP
+# Let your model configure its own client
+
+English · [繁體中文](#繁體中文)
+
+Open this project in Codex or Claude Code and give the model the prompt below. Each model configures the client it is running in; run it once on each side.
+
+```text
+Set up this project's C-C chat bridge in the MCP client you are currently using, so you can discover and read chats and exchange messages through the other tool's native chat interface.
+
+Read README.md, docs/usage.md, and the example for your client in examples/. Confirm the project path, Node.js, the actual Codex owner chat ID, and its current native pipe. Reuse and verify existing configuration or connection values; do not invent IDs or pipe paths. Ask only for necessary values you cannot obtain yourself.
+
+Replace the example placeholders with real values and merge the configuration into your own client's appropriate MCP settings, preserving other settings. Use absolute paths and the documented tool timeouts. Keep personal connection data local and out of Git. Do not modify the other client's settings.
+
+Use your actual MCP connection to list the bridge tools and read the Codex and Claude chat lists, confirming that both sides are readable. If the user needs to reload the client, give precise instructions; writing configuration alone does not prove connectivity. Before testing message delivery, obtain user authorization for the destination chat and test content, and distinguish dispatch, a received reply, and an unknown outcome as documented.
+
+Briefly report the configuration location, the capabilities you verified, and any remaining connection problem.
+```
+
+Codex can usually obtain the owner and pipe values from its current Desktop chat. If Claude does not have them, the user can have an authorized Codex chat obtain them using the [setup guide](usage.md#取得-codex-來源與管道). This prompt contains no personal connection data.
+
+## 繁體中文
 
 在本專案目錄開啟 Codex 或 Claude Code，把以下提示交給模型。模型應設定它自己正在使用的客戶端；雙方各執行一次，即可各自取得橋接工具。
 
