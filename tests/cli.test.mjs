@@ -19,7 +19,7 @@ async function cli(args) {
 }
 
 test('subcommand help prints usage without reading config or sending messages', async () => {
-  for (const command of ['bridge','claude','codex']) {
+  for (const command of ['bridge','claude','codex','agy']) {
     const result = await cli([command, '--help']);
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout, /Local chat bridge/);

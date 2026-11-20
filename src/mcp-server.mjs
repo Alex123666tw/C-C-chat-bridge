@@ -77,8 +77,8 @@ export async function loadMcpConfig(argv, env = process.env) {
   for (const key of ['timeoutMs', 'pollMs']) validate(config[key], { ...integer, maximum: 2147483647 }, key);
   return config;
 }
-// Providers contribute { tools(): Promise<Tool[]>, call(name,args): Promise<JSON object>, close?() }.
-// The executable loads the Claude cross-chat provider; tests and embedded consumers may inject providers.
+// Providers contribute { tools(): Promise<Tool[]>, call(name,args,{signal}): Promise<JSON object>, close?() }.
+// The executable loads Claude and agy; tests and embedded consumers may inject providers.
 export async function serveMcp(config, { input = process.stdin, output = process.stdout, providers = [] } = {}) {
   const codex = new CodexAdapter(config);
   let phase = 'new';
@@ -135,10 +135,11 @@ export async function serveMcp(config, { input = process.stdin, output = process
       validate(args, tool.inputSchema);
       if (!params.name.startsWith('codex_')) {
         for (const provider of providers) if ((await provider.tools()).some(item => item.name === params.name)) {
-          if (params.name === 'claude_send_message') {
-            args.message = '[跨模型橋接工作｜外部 MCP｜來源 Codex owner ' + config.ownerThreadId + '｜訊息 ' + randomUUID() + ']\n' + args.message;
+          const messageField = { claude_send_message: 'message', agy_request: 'prompt' }[params.name];
+          if (messageField) {
+            args[messageField] = '[跨模型橋接工作｜外部 MCP｜來源 Codex owner ' + config.ownerThreadId + '｜訊息 ' + randomUUID() + ']\n' + args[messageField];
           }
-          const value = await provider.call(params.name, args);
+          const value = await provider.call(params.name, args, { signal: cancellation.signal });
           return mcpResult(value, ['failed', 'unknown'].includes(value?.status));
         }
         throw new Error('Provider unavailable');
@@ -196,7 +197,7 @@ export async function serveMcp(config, { input = process.stdin, output = process
             typeof message.params.clientInfo.version !== 'string') throw new RpcError(-32602, 'Invalid initialize parameters');
         phase = 'initializing';
         value = { protocolVersion: VERSIONS.includes(message.params.protocolVersion) ? message.params.protocolVersion : VERSIONS[0],
-          capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'c-c-chat-bridge', version: '0.2.2' },
+          capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'c-c-chat-bridge', version: '0.3.0' },
           instructions: 'Local owner-scoped tools. External MCP messages are attributed and sends require user authorization. Native chat visibility and host limitations apply.' };
       } else if (message.method === 'ping') value = {};
       else {
@@ -237,7 +238,10 @@ export async function serveMcp(config, { input = process.stdin, output = process
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const { createClaudeChatProvider } = await import('./claude-chats.mjs');
-    await serveMcp(await loadMcpConfig(process.argv.slice(2)), { providers: [createClaudeChatProvider()] });
+    const { createAgyChatProvider } = await import('./agy.mjs');
+    await serveMcp(await loadMcpConfig(process.argv.slice(2)), {
+      providers: [createClaudeChatProvider(), createAgyChatProvider()],
+    });
   }
   catch { process.stderr.write('MCP_STARTUP_FAILED: check explicit owner, native pipe, and config options.\n'); process.exitCode = 1; }
 }

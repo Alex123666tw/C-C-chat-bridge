@@ -2,16 +2,17 @@
 
 [回到首頁](../README.md) · [介面與限制](interfaces.md) · [安全政策](../.github/SECURITY.md)
 
-本工具讓 Codex 與 Claude Code 接上對方的原生跨聊天介面。先完成本機接線、讀取確認，再對已獲使用者授權的目的聊天傳訊。
+本工具讓 Codex、Claude Code 與 Antigravity CLI（`agy`）透過原生聊天介面協作。先完成本機接線、讀取確認，再對已獲使用者授權的目的聊天傳訊。
 
 ## 環境需求
 
 - Windows、Node.js 20 以上；使用 Node 內建模組，無須 `npm install`。
 - 正在執行的 Codex Desktop，及允許橋接使用其內部工具的來源 Codex 聊天。
 - 若要傳訊給 Claude，目的必須是本機正在執行、具有原生訊息管道的 Claude Code session。只有歷史檔案的聊天可讀取，不能直接收訊。
+- 若要由橋接器列舉、讀取或傳訊給 Antigravity CLI，須安裝支援 `agy acp` 的版本，並用執行橋接器的帳號登入 agy。[Antigravity CLI ACP 指南](https://antigravity.google/docs/cli/acp/)
 - 執行橋接的 Windows 帳號必須能存取原生管道與 Claude Code 的本機 registry。請閱讀[信任與資料範圍](interfaces.md#信任與資料範圍)。
 
-內部介面不是穩定的公開 API。最初核對的版本為 Codex Desktop `26.1002.7124.0` 與 Claude Code `2.1.289`；這不是所有版本的相容保證。
+Codex Desktop 與 Claude Code 的內部介面會隨版本更新。最初核對的版本為 Codex Desktop `26.1002.7124.0` 與 Claude Code `2.1.289`。Antigravity CLI 的 ACP 實測使用 `1.5.13`。
 
 下載或 clone 專案後，在專案目錄執行：
 
@@ -59,9 +60,9 @@ node src/cli.mjs codex read --owner-thread "YOUR_CODEX_OWNER_THREAD_ID" --pipe "
 
 本機目的可省略 `--host-id`，沿用原生預設。讀取失敗時先修正接線，不先用傳訊測試連線。
 
-## 接入兩端 MCP
+## 接入 MCP
 
-本工具提供 stdio MCP server，**不會自動安裝或修改任何客戶端設定**。Codex 與 Claude 各自啟動一個 server 程序；可使用同一組已授權 owner 與當次 pipe，但 inbox 不會在兩個程序間共用。
+各客戶端自行啟動一個 stdio MCP server 程序，並可沿用同一組已授權的 Codex owner 與當次 pipe。Claude 回信會進入發訊程序的 inbox，請保持該連線。
 
 ### Codex 設定
 
@@ -103,6 +104,21 @@ tool_timeout_sec = 660
 這份含個人接線資訊的 `.mcp.json` 請留在本機。若不希望使用專案共享設定，可依 `claude mcp add --help` 選用 `local` 或 `user` scope；兩者由 Claude 自己管理。啟動 Claude 後依其介面確認 MCP，使用 `/mcp` 查看連線，再呼叫讀取工具。工具可見與 MCP 已連線仍不代表使用者已授權任意傳訊。
 
 已開啟的 Claude 工作階段可能保留舊註冊名稱及工具清單。更新設定後，重新連接該 MCP，或重新開啟受影響的聊天；新工作階段讀取得到工具，仍不能證明舊工作階段已更新。
+
+### Antigravity CLI 設定
+
+先取得[授權的 Codex 來源與當次管道](#取得-codex-來源與管道)，把 `codexOwnerThreadId` 和 `codexPipePath` 寫入本機 `runtime/agy-mcp.json`，格式見 [MCP 啟動設定](#mcp-啟動設定)。只需填這兩個欄位。更新管道時，改這份檔案並重載 agy MCP。
+
+將下面的三個絕對路徑改成本機實際路徑，再用 agy 註冊橋接器。
+
+```powershell
+agy mcp add c-c-chat-bridge -- "C:/Program Files/nodejs/node.exe" "C:/tools/c-c-chat-bridge/src/mcp-server.mjs" --config "C:/tools/c-c-chat-bridge/runtime/agy-mcp.json"
+agy mcp list
+```
+
+也可將 [agy 範例](../examples/agy-mcp.example.json) 的 `c-c-chat-bridge` 項目合併到 `%USERPROFILE%\.gemini\config\mcp_config.json`，或專案的 `.agents/mcp_config.json` 以限定使用範圍。agy 預設每次工具呼叫最多等待 180 秒。若要讓 `codex_request` 等候橋接預設的 600 秒，請以範例中的 `timeoutSeconds: 660` 設定該 server 項目。[Antigravity 官方 MCP 設定](https://antigravity.google/docs/mcp/)
+
+在 agy 中用 `/mcp` 重載並確認 `c-c-chat-bridge` 已連線，再請模型呼叫 `codex_list_threads` 或 `claude_list_chats`。這會確認 agy 能實際讀取你要連接的聊天來源。
 
 ### 只啟動 server 不會開聊天
 
@@ -157,6 +173,20 @@ node src/mcp-server.mjs --owner-thread "YOUR_CODEX_OWNER_THREAD_ID" --pipe "YOUR
 `submitted_unconfirmed` 只表示已寫入原生管道。Inbox 的 `receipt` 可用 `originalMsgId` 核對原始訊息；`message` 的 `correlation: "source_session_only"` 只確認來源 session，不能直接斷言對應某個請求。可在自己的測試訊息加入唯一字串，再核對回覆內容。
 
 依 `nextOffset` 繼續讀 inbox。每個程序最多保留 1000 件，`retainedFrom` 表示目前仍保留的最早 index；重新啟動程序後 inbox 消失。不要在另一客戶端、另一個新程序或新連線的 inbox 尋找舊程序收到的回覆。
+
+### 續跑 Antigravity CLI 聊天並取得回覆
+
+用 `agy_list_chats` 取得目的聊天的 `sessionId` 與 `cwd`，再用同一組值呼叫 `agy_read_chat` 讀取原生介面可重播的聊天內容。對使用者選定且授權的聊天，呼叫 `agy_request`。
+
+```json
+{
+  "sessionId": "YOUR_LISTED_AGY_SESSION_ID",
+  "cwd": "C:/path/to/listed/workspace",
+  "prompt": "請只回覆 AGY_BRIDGE_HELLO。"
+}
+```
+
+橋接器會啟動 `agy acp`，在相同工作階段續跑本次提示並等待回覆。若送出後無法確認結果，先用 `agy_read_chat` 檢查同一聊天再決定是否重送。
 
 ## MCP 啟動設定
 
@@ -269,6 +299,16 @@ node src/cli.mjs claude send --session-id "YOUR_LIVE_CLAUDE_SESSION_UUID" --call
 
 `sessions` 只接受可選的 `--registry-dir`。`send` 接受 `--session-id`、`--registry-dir`、`--message-file`、`--callback-uri`；它不啟動 receiver，callback 必須是你已啟動且有效的本機 `uds:` URI。不能用任意文字代替、猜測其他程序地址，或期待命令退出後仍能接回覆。需要由工具管理 callback 時使用 MCP 或 `bridge serve`。
 
+### 直接 Antigravity CLI
+
+```powershell
+node src/cli.mjs agy chats
+node src/cli.mjs agy read --session-id "YOUR_LISTED_AGY_SESSION_ID" --cwd "C:/path/to/listed/workspace"
+node src/cli.mjs agy request --session-id "YOUR_LISTED_AGY_SESSION_ID" --cwd "C:/path/to/listed/workspace" --message-file "runtime/request.txt"
+```
+
+`chats` 可用 `--cwd` 篩選工作目錄，並將 `nextCursor` 傳入下一次呼叫的 `--cursor`。`read` 和 `request` 用列表回傳的工作階段 ID 與目錄。`read` 可把 `nextOffset` 傳入 `--offset` 繼續讀取，`--limit` 預設 100、最多 200。`request` 可用 `--timeout-ms` 指定逾時。直接使用這三個命令只需要 agy 的原生連線。
+
 ## 排錯與未知結果
 
 | 現象 | 檢查方式 |
@@ -279,6 +319,8 @@ node src/cli.mjs claude send --session-id "YOUR_LIVE_CLAUDE_SESSION_UUID" --call
 | Claude `not_available` | 目的是否仍 live、是否只有一筆精確 session；歷史存在不代表可發送 |
 | `AUTH_KEY_UNAVAILABLE` | 原生 Claude 程序／registry 是否有效且可讀；不要公開 key，也不要為測試改帳戶權限 |
 | inbox `pending` | 目的是否用原生 SendMessage 回 `from`；是否還在同一 MCP 程序；查 `nextOffset`／`retainedFrom` |
+| agy 的聊天無法列出或載入 | 確認 `agy acp --help` 可執行、使用執行橋接的帳號登入 agy，再重讀列表。載入時使用列表回傳的工作階段 ID 與目錄 |
+| `AGY_SESSION_BUSY` | 同一橋接程序已有工作傳給該 agy 聊天，先等原工作結束再續跑 |
 | `TARGET_BUSY_TIMEOUT` | 未派送，目的尚未空閒；先看目的正在做什麼 |
 | `RESULT_TIMEOUT`／`COMPLETED_WITHOUT_FINAL` | 已派送但未取得可確認的本次完整 final；用目的 ID 與 `msgId`／`turnId` 核對聊天 |
 | 客戶端取消或更早逾時 | 一併核對客戶端工具時間與 server 結果時間；取消等候不等於取消已送出的對端工作 |
