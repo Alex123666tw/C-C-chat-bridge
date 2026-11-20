@@ -2,7 +2,7 @@
 
 [回到首頁](../README.md) · [安裝與使用](usage.md) · [安全政策](../.github/SECURITY.md)
 
-本工具是原生聊天介面的薄橋接。Codex 端直接呼叫 Desktop 的內部跨聊天工具；Claude 端讀取本機可見歷史並使用認證訊息管道。它不提供一般檔案服務，也不新增對外 HTTP server。
+本工具是原生聊天介面的薄橋接。Codex 端直接呼叫 Desktop 的內部跨聊天工具，Claude 端讀取本機可見歷史並使用認證訊息管道，Antigravity 端使用 `agy acp` 的標準輸入與輸出。[Antigravity CLI ACP 指南](https://antigravity.google/docs/cli/acp/)
 
 Codex 的聊天清單以當次原生 `list_threads` 為準，可能包括本機、已連線遠端及 ChatGPT 聊天；讀取仍是原生可取得的回合與摘要。Claude 的原生 `ListAgents` 列出可聯繫的 peer，不等於全部儲存歷史；本橋接的 `claude_list_chats` 另外列出本機歷史，只有 `live`／`sendAvailable` 的聊天可嘗試傳訊。Claude 原生 `SendMessage` 用來傳訊，沒有讀取對方歷史的參數。
 
@@ -59,7 +59,23 @@ MCP 入口為 `src/mcp-server.mjs`，以 stdin/stdout 每行一個 JSON-RPC 2.0 
 
 Claude 歷史以原生記錄順序回傳，保留 `parentUuid`，不推定分支為單一直線對話。主聊天與子代理分開標示。`not_available` 會說明 `LIVE_SESSION_NOT_FOUND`、`AMBIGUOUS_SESSION`、`HISTORY_NOT_FOUND`、`AMBIGUOUS_HISTORY` 或 `AGENT_HISTORY_NOT_FOUND`；讀不到與不能傳訊是不同結果。
 
-Inbox 中 `receipt` 有 `originalMsgId` 與原生 status；`message` 有來源 `sessionId`、`msgId`、可見 content 與 `correlation: "source_session_only"`。一般回覆沒有可靠的 request ID，不能只因來自同 session 就當成某次工作的完整答覆。
+Inbox 中 `receipt` 有 `originalMsgId` 與原生 status；`message` 有來源 `sessionId`、`msgId`、可見 content 與 `correlation: "source_session_only"`。一般回覆沒有可靠的 request ID，須搭配訊息內容才能核對某次工作的完整答覆。
+
+### Antigravity CLI 工具
+
+| MCP 工具 | Arguments | 回傳與使用重點 |
+|---|---|---|
+| `agy_list_chats` | 可選 `cwd`、`cursor` | `status: "ok"`、原生 `sessions`（含 `sessionId`、`cwd`）與 `nextCursor` |
+| `agy_read_chat` | 必填 `sessionId`、`cwd`，可選 `offset`、`limit` | `status: "read"`、`sessionId`、重播的文字 `messages`、`offset`、`nextOffset` |
+| `agy_request` | 必填 `sessionId`、`cwd`、`prompt`，可選 `timeoutMs` | 續跑指定聊天，成功回傳 `status: "completed"`、`delivery`、`sessionId`、`stopReason: "end_turn"` 及本次回合的 `text` |
+
+聊天範圍由當前版本及執行帳號在 ACP 上可列舉、載入或續跑的工作階段決定。讀取與傳訊使用列表回傳的 `sessionId` 和 `cwd`，工作階段會由橋接器啟動的 `agy acp` 程序載入或續跑。已開啟的 agy 終端有自己的畫面和程序。[Antigravity CLI ACP 指南](https://antigravity.google/docs/cli/acp/)
+
+在 agy `1.5.13` 實測，新的 ACP 程序可以列出隔離測試聊天，載入並重播使用者及助理訊息，也可在同一工作階段繼續一個依賴前文的回合。
+
+列表沿用原生游標及排序。有指定 `cwd` 時，橋接再依工作目錄過濾當頁，請按 `nextCursor` 繼續查找。歷史按 ACP 重播的使用者與助理文字片段分頁，每項有 `role` 和 `text`。`offset` 預設 0，`limit` 預設 100、最多 200，後續頁使用 `nextOffset`。
+
+列表與讀取預設 30 秒。續跑預設 120 秒，`timeoutMs` 可指定單次預算。橋接會拒絕 ACP 向客戶端提出的額外許可請求，工作階段仍沿用 agy 本身的工具與權限。同一橋接程序內同時對同一聊天續跑會回 `AGY_SESSION_BUSY`。發送後遇到逾時或斷線，橋接會回 `unknown`，請查看目的聊天再決定是否重送。
 
 ## 完整答覆如何判定
 
@@ -78,7 +94,7 @@ Inbox 中 `receipt` 有 `originalMsgId` 與原生 status；`message` 有來源 `
 |---|---|
 | `accepted` | Codex 原生工具接受派送，尚未確認工作結果 |
 | `submitted_unconfirmed` | 已寫入 Claude 原生認證管道，沒有直接 ACK，等待 callback 證據 |
-| `completed` | 精確本次 Codex turn 的完整 final 已觀察到 |
+| `completed` | 已收到精確對應本次請求的 Codex 或 Antigravity 回覆 |
 | `received` | 本 MCP 程序 inbox 有符合查詢的訊息／回執 |
 | `pending` | 當次查詢没有 inbox 項目 |
 | `not_available` | 找不到或無法唯一定位目的／歷史；Claude 傳訊會帶 `delivery: "not_sent"` |
@@ -91,7 +107,7 @@ Inbox 中 `receipt` 有 `originalMsgId` 與原生 status；`message` 有來源 `
 
 - 橋接與客戶端信任同一 Windows 帳號下的程序。Claude token 認證檢查本機 key；持有同帳號檔案存取能力的程序可能取得它。來源 `from` 核對是路由／歸屬檢查，**不是獨立的程序身分驗證**。
 - owner 與來源標籤用於原生呼叫範圍及對端辨識。它們**不是人類授權**；本工具不替使用者批准對任意聊天發訊，也不繞過對端審查。
-- MCP read 工具不是專案 allowlist。Codex 可見範圍沿用原生 owner，包括 App 已連線的遠端主機；Claude 可列／讀本機 `.claude/projects` 中跨專案的主聊天與子代理歷史。只把此 MCP 接給受信任的客戶端。
+- MCP 讀取範圍由來源介面決定。Codex 沿用原生 owner 的範圍，包括 App 已連線的遠端主機。Claude 可列／讀本機 `.claude/projects` 中跨專案的主聊天與子代理歷史。Antigravity 沿用該 ACP 帳號的工作階段範圍。只把此 MCP 接給受信任的客戶端。
 - Claude 讀取保留可見 user/assistant 原文、tool inputs/results，排除 hidden thinking、內部事件與獨立 auth key。**正文及工具資料不會自動遮罩秘密**；Codex 原生可見回傳也照原樣保留。
 - callback key、私人聊天、pipe 與個人接線設定不得公開。`runtime/`、`tests/output/`、`.work/` 已 gitignore，但 gitignore 不能清除既有 Git 歷史或防止手動複製敏感資料。
 

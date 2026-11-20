@@ -255,7 +255,7 @@ test('provider injection exposes the other chat view over the same real stdio pr
   assert.equal(endpoint.requests.filter(item => item.method === 'tools/call').length, 0);
 });
 
-test('actual executable starts from config without a Claude session, loads both chat providers and exits cleanly on EOF', async t => {
+test('actual executable lists all three native chat sources and exits cleanly on EOF', async t => {
   const endpoint = await fakeNativePipe(t, (request, socket) => reply(socket, request, fullNative));
   const configPath = join(tmpdir(), 'chat-mcp-config-' + randomUUID() + '.json');
   await writeFile(configPath, '\uFEFF' + JSON.stringify({ codexOwnerThreadId: 'authorized-owner', codexPipePath: endpoint.pipePath,
@@ -270,6 +270,9 @@ test('actual executable starts from config without a Claude session, loads both 
   assert.ok(listed.some(tool => tool.name === 'claude_list_chats'));
   assert.ok(listed.some(tool => tool.name === 'claude_read_chat'));
   assert.ok(listed.some(tool => tool.name === 'claude_send_message'));
+  for (const name of ['agy_list_chats', 'agy_read_chat', 'agy_request']) {
+    assert.ok(listed.some(tool => tool.name === name), name);
+  }
   client.child.stdin.end();
   assert.equal(await client.closed, 0);
   assert.equal(client.stderr(), '');

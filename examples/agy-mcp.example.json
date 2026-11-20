@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "c-c-chat-bridge": {
+      "command": "C:/Program Files/nodejs/node.exe",
+      "args": [
+        "C:/tools/c-c-chat-bridge/src/mcp-server.mjs",
+        "--config",
+        "C:/tools/c-c-chat-bridge/runtime/agy-mcp.json"
+      ],
+      "timeoutSeconds": 660
+    }
+  }
+}
